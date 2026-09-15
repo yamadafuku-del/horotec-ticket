@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>整理券予約・確認</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f4f6f8; color: #333; }
@@ -11,6 +13,7 @@
     .ticket-number { font-size: 56px; font-weight: 900; color: #00B900; margin: 10px 0; letter-spacing: 2px; }
     .ticket-info { font-size: 16px; color: #444; margin-bottom: 8px; }
     .status-badge { display: inline-block; background: #e8f5e9; color: #2e7d32; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-size: 14px; margin-top: 6px; }
+    .test-banner { background-color: #fff3cd; color: #856404; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; border: 1px solid #ffeeba; }
     
     label { font-weight: bold; display: block; margin-top: 12px; text-align: left; }
     select, textarea, button { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid #ccc; font-size: 16px; box-sizing: border-box; }
@@ -22,6 +25,11 @@
   </style>
 </head>
 <body>
+
+  <!-- テストモード表示バナー -->
+  <div id="test-banner" class="test-banner" style="display: none;">
+    ⚠️ 現在ブラウザ直接閲覧モード（テスト環境）で表示中
+  </div>
 
   <div id="loading" class="loading">読み込み中...</div>
 
@@ -67,39 +75,71 @@
   </div>
 
   <script>
-    let currentUserId = '';
+    let currentUserId = 'TEST_USER_999';
     let currentTicketNo = '';
+    let isTestMode = false;
+
+    // ダミーデータ（ブラウザテスト用）
+    const dummySlots = [
+      { code: 'A', label: '10:00〜10:30', capacity: 15, remaining: 8 },
+      { code: 'B', label: '10:30〜11:00', capacity: 15, remaining: 15 },
+      { code: 'C', label: '11:00〜11:30', capacity: 15, remaining: 0 }
+    ];
+    let dummyReservation = null;
 
     window.onload = function () {
-      // LIFF初期化（ご自身のLIFF IDに書き換えてください）
-      liff.init({ liffId: "YOUR_LIFF_ID" })
-        .then(() => {
-          if (!liff.isLoggedIn()) {
-            liff.login();
-          } else {
-            liff.getProfile().then(profile => {
-              currentUserId = profile.userId;
-              refreshData();
-            });
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          // デモ・テスト用フォールバック
-          currentUserId = "TEST_USER_ID";
-          refreshData();
-        });
+      // LIFF IDが設定されているかチェック
+      const LIFF_ID = "YOUR_LIFF_ID"; // ※実際のLIFF IDを入れてください
+
+      if (typeof liff !== 'undefined' && LIFF_ID && LIFF_ID !== "YOUR_LIFF_ID") {
+        liff.init({ liffId: LIFF_ID })
+          .then(() => {
+            if (liff.isLoggedIn()) {
+              liff.getProfile().then(profile => {
+                currentUserId = profile.userId;
+                refreshData();
+              });
+            } else {
+              // ブラウザテスト時
+              enableTestMode();
+            }
+          })
+          .catch(err => {
+            console.warn("LIFF 初期化スキップ (テストモード移行):", err);
+            enableTestMode();
+          });
+      } else {
+        enableTestMode();
+      }
     };
 
+    function enableTestMode() {
+      isTestMode = true;
+      document.getElementById('test-banner').style.display = 'block';
+      refreshData();
+    }
+
     function refreshData() {
-      google.script.run.withSuccessHandler(slots => {
-        renderSlots(slots);
-        google.script.run.withSuccessHandler(res => {
-          renderReservation(res);
-          document.getElementById('loading').style.display = 'none';
-          document.getElementById('main-content').style.display = 'block';
-        }).getUserReservation(currentUserId);
-      }).getSlotAvailability();
+      if (isTestMode || typeof google === 'undefined' || !google.script) {
+        // テスト表示用データレンダリング
+        renderSlots(dummySlots);
+        renderReservation(dummyReservation);
+        showMainContent();
+      } else {
+        // GAS本番連携
+        google.script.run.withSuccessHandler(slots => {
+          renderSlots(slots);
+          google.script.run.withSuccessHandler(res => {
+            renderReservation(res);
+            showMainContent();
+          }).getUserReservation(currentUserId);
+        }).getSlotAvailability();
+      }
+    }
+
+    function showMainContent() {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('main-content').style.display = 'block';
     }
 
     function renderSlots(slots) {
@@ -140,6 +180,17 @@
       const slot = document.getElementById('slot-select').value;
       const party = document.getElementById('party-select').value;
       
+      if (isTestMode || typeof google === 'undefined' || !google.script) {
+        dummyReservation = {
+          ticketNo: `${slot}-1`,
+          partySize: party,
+          slotCode: slot
+        };
+        alert(`【テスト表示】整理券 ${slot}-1（${party}名）を発行しました。`);
+        refreshData();
+        return;
+      }
+
       document.getElementById('loading').style.display = 'block';
       document.getElementById('main-content').style.display = 'none';
 
@@ -157,6 +208,13 @@
 
     function handleCancel() {
       if (!confirm('本当に予約を全キャンセルしますか？')) return;
+
+      if (isTestMode || typeof google === 'undefined' || !google.script) {
+        dummyReservation = null;
+        alert('【テスト表示】予約をキャンセルしました。');
+        refreshData();
+        return;
+      }
 
       document.getElementById('loading').style.display = 'block';
       document.getElementById('main-content').style.display = 'none';
@@ -176,6 +234,12 @@
     function handleInquiry() {
       const text = document.getElementById('inquiry-text').value;
       if (!text.trim()) return alert('メッセージを入力してください。');
+
+      if (isTestMode || typeof google === 'undefined' || !google.script) {
+        alert('【テスト表示】問い合わせを送信しました。');
+        document.getElementById('inquiry-text').value = '';
+        return;
+      }
 
       google.script.run
         .withSuccessHandler(res => {
